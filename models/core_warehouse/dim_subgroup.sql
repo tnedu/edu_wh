@@ -20,6 +20,7 @@ xwalk_subgroup_category_display_names as (
 stu_long_subgroup as (
     {{ dbt_utils.unpivot(
        relation=ref('dim_student'),
+       cast_to='string',
        exclude=[
           'k_student',
           'k_student_xyear',
@@ -79,7 +80,7 @@ joined_with_display_names as (
 
 keyed as (
   select
-    {{ dbt_utils.surrogate_key(['subgroup_category', 'subgroup_value'])}} as k_subgroup,
+    {{ dbt_utils.generate_surrogate_key(['subgroup_category', 'subgroup_value'])}} as k_subgroup,
     joined_with_display_names.subgroup_category,
     joined_with_display_names.subgroup_category_display_name,
     joined_with_display_names.subgroup_value,
