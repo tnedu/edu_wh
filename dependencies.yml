@@ -1,2 +1,2 @@
 packages:
-  - local: ../../edu_edfi_source
+  - package: tnedu/edu_edfi_source
