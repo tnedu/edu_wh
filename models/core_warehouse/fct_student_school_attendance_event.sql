@@ -13,6 +13,9 @@
   )
 }}
 
+{{ cds_depends_on('edu:student_school_attendance_event:custom_data_sources') }}
+{% set custom_data_sources = var('edu:student_school_attendance_event:custom_data_sources', []) %}
+
 with stg_stu_sch_attend as (
     select * from {{ ref('stg_ef3__student_school_attendance_events') }}
 ),
@@ -31,13 +34,7 @@ dim_calendar_date as (
 fct_student_school_assoc as (
     /*
     We bring in this table to get the `k_school_calendar` we need to turn
-    `attendance_event_date` into `k_calendar_date`. Because a student could have
-    multiple enrollments at the same school in the same year, we specify the join
-    such that the attendance_event_date is within the range of the enrolmment's
-    entry_date and exit_withdraw_date. This accounts for the case where a student's
-    multiple enrollments each made use of different calendars. However, if a 
-    student has overlapping enrollments at the same school, multiple rows will
-    be returned for each date. Therefore we must introduce a deduplication step.
+    the same calendar to be sure.
     */
     select 
         *,
@@ -116,6 +113,11 @@ formatted as (
         educational_environment
         {# add any extension columns configured from stg_ef3__student_school_attendance_events #}
         {{ edu_edfi_source.extract_extension(model_name='stg_ef3__student_school_attendance_events', flatten=False) }}
+        -- custom data sources columns
+        {{ add_cds_columns(custom_data_sources=custom_data_sources) }}
     from deduped
+
+    -- custom data sources
+    {{ add_cds_joins_v2(custom_data_sources=custom_data_sources) }}
 )
 select * from formatted
