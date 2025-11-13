@@ -13,6 +13,9 @@
 {# Load custom data sources from var #}
 {% set custom_data_sources = var("edu:discipline_actions:custom_data_sources", []) %}
 
+{# Load custom data sources from var #}
+{% set custom_data_sources = var("edu:discipline_actions:custom_data_sources", []) %}
+
 with stg_discipline_actions as (
     select * from {{ ref('stg_ef3__discipline_actions') }}
 ),
