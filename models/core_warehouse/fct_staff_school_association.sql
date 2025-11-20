@@ -49,8 +49,7 @@ formatted as (
         coalesce(school_assign.position_title, 
                  lea_assign.position_title) as position_title,
         coalesce(school_assign.begin_date, 
-                 lea_assign.begin_date,
-                 to_date('1900-01-01', 'yyyy-MM-dd')) as begin_date,
+                 lea_assign.begin_date) as begin_date,
         coalesce(school_assign.end_date, 
                  lea_assign.end_date) as end_date,
         coalesce(school_assign.full_time_equivalency, 
@@ -58,8 +57,7 @@ formatted as (
         coalesce(school_assign.order_of_assignment, 
                  lea_assign.order_of_assignment) as order_of_assignment,
         coalesce(school_assign.staff_classification, 
-                 lea_assign.staff_classification,
-                 'Not sent by SIS') as staff_classification
+                 lea_assign.staff_classification) as staff_classification
         {# add any extension columns configured from stg_ef3__staff_school_associations #}
         {{ edu_edfi_source.extract_extension(model_name='stg_ef3__staff_school_associations', flatten=False) }}
         {# add any extension columns configured from stg_ef3__staff_education_organization_assignment_associations #}
