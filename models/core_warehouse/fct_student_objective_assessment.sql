@@ -96,7 +96,7 @@ student_obj_assessments_wide as (
 select 
     student_obj_assessments_wide.*,
     v_other_results
-
+    
     -- custom data sources columns
     {{ add_cds_columns(custom_data_sources=custom_data_sources) }}
 from student_obj_assessments_wide
