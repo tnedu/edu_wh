@@ -16,6 +16,9 @@
 -- Define all optional program service models here.
 {% set stage_program_relations = [] %}
 
+--Generic Program Assoc
+{% do stage_program_relations.append(ref('stg_ef3__stu_program__program_services')) %}
+
 -- Special Education
 {% if var('src:program:special_ed:enabled', True) %}
     {% do stage_program_relations.append(ref('stg_ef3__stu_spec_ed__program_services')) %}
@@ -79,10 +82,16 @@ subset as (
     stacked.k_student_xyear,
     stacked.k_program,
     stacked.tenant_code,
+    stacked.ed_org_id,
     stacked.program_enroll_begin_date,
     stacked.program_service,
     stacked.primary_indicator,
-    stacked.v_providers,
+    {% if var('src:program:special_ed:enabled', True) %}
+        stacked.v_providers,
+    {% endif %}
+    {% if var('src:program:cte:enabled', True) %}
+        stacked.cip_code,
+    {% endif %}
     stacked.service_begin_date,
     stacked.service_end_date
     {# add any extension columns configured from all stage_program_relations #}
