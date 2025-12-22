@@ -82,6 +82,7 @@ subset as (
     stacked.k_student_xyear,
     stacked.k_program,
     stacked.tenant_code,
+    stacked.ed_org_id,
     stacked.program_enroll_begin_date,
     stacked.program_service,
     stacked.primary_indicator,
