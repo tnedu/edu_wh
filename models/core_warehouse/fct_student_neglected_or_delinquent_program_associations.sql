@@ -15,6 +15,9 @@
   )
 }}
 
+{{ cds_depends_on('edu:student_neg_o_deliq_program_assoc:custom_data_sources') }}
+{% set custom_data_sources = var('edu:student_neg_o_deliq_program_assoc:custom_data_sources', []) %}
+
 with stage as (
     select * from {{ ref('stg_ef3__student_neglected_or_delinquent_program_associations') }}
 ),
@@ -48,6 +51,9 @@ formatted as (
         {# add any extension columns configured from stg_ef3__student_neglected_or_delinquent_program_associations #}
         {{ edu_edfi_source.extract_extension(model_name='stg_ef3__student_neglected_or_delinquent_program_associations', flatten=False) }}
 
+        -- custom data sources columns
+        {{ add_cds_columns(custom_data_sources=custom_data_sources) }}
+
     from stage
 
     join dim_student
@@ -55,6 +61,10 @@ formatted as (
 
     join dim_program
         on stage.k_program = dim_program.k_program
+
+    -- custom data sources
+    {{ add_cds_joins_v1(custom_data_sources=custom_data_sources, driving_alias='dedupe_assessments', join_cols=['k_assessment']) }}
+    {{ add_cds_joins_v2(custom_data_sources=custom_data_sources) }}
 )
 
 select * from formatted

@@ -14,6 +14,9 @@
   )
 }}
 
+{{ cds_depends_on('edu:student_school_association:custom_data_sources') }}
+{% set custom_data_sources = var('edu:student_school_association:custom_data_sources', []) %}
+
 with bld_stu_sch_assoc_flags as (
     select * from {{ ref('bld_ef3__stu_sch_assoc__enrollment_flags') }}
 ),
@@ -78,8 +81,15 @@ formatted as (
         {#- add any extension columns configured from stg_ef3__student_school_associations #}
         {{ edu_edfi_source.extract_extension(model_name='stg_ef3__student_school_associations', flatten=False) }}
 
+        -- custom data sources columns
+        {{ add_cds_columns(custom_data_sources=custom_data_sources) }}
+
     from bld_stu_sch_assoc_flags
     left join xwalk_grade_levels
         on bld_stu_sch_assoc_flags.entry_grade_level = xwalk_grade_levels.grade_level
+    
+    -- custom data sources
+    {{ add_cds_joins_v1(custom_data_sources=custom_data_sources, driving_alias='stg_stu_school', join_cols=['k_student', 'k_school', 'entry_date']) }}
+    {{ add_cds_joins_v2(custom_data_sources=custom_data_sources) }}
 )
 select * from formatted

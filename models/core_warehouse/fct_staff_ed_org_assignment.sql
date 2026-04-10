@@ -11,6 +11,9 @@
   )
 }}
 
+{{ cds_depends_on('edu:staff_ed_org_assignment:custom_data_sources') }}
+{% set custom_data_sources = var('edu:staff_ed_org_assignment:custom_data_sources', []) %}
+
 with stg_staff_ed_org_assign as (
     select * from {{ ref('stg_ef3__staff_education_organization_assignment_associations')}}
 ),
@@ -41,9 +44,16 @@ formatted as (
         stg_staff_ed_org_assign.credential_state,
         stg_staff_ed_org_assign.staff_classification
         {{ edu_edfi_source.extract_extension(model_name='stg_ef3__staff_education_organization_assignment_associations', flatten=False) }}
+
+        -- custom data sources columns
+        {{ add_cds_columns(custom_data_sources=custom_data_sources) }}
     from stg_staff_ed_org_assign
     join dim_staff
         on stg_staff_ed_org_assign.k_staff = dim_staff.k_staff
+
+    -- custom data sources
+    {{ add_cds_joins_v1(custom_data_sources=custom_data_sources, driving_alias='dedupe_assessments', join_cols=['k_assessment']) }}
+    {{ add_cds_joins_v2(custom_data_sources=custom_data_sources) }}
 ),
 check_active as (
     select
