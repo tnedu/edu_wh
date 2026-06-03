@@ -72,9 +72,9 @@ formatted as (
                 -- standard: not yet exited as of the last day of the school year for the enrollment record
                 {{ date_within_end_date(
                     'current_date()', 
-                    'coalesce(stg_stu_school.exit_withdraw_date, bld_school_calendar_windows.last_school_day)', 
+                    'least(coalesce(stg_stu_school.exit_withdraw_date, bld_school_calendar_windows.last_school_day), bld_school_calendar_windows.last_school_day)', 
                     var('edu:enroll:exit_withdraw_date_inclusive', True)) }}
-                
+
                 -- extended: if configured, students who exit at the end of the school year are still active until buffer days
                 {%- set buffer_days = var('edu:enroll:year_end_active_buffer_days', none) -%}
                 {%- if buffer_days is not none %}
