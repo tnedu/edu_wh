@@ -27,7 +27,7 @@
 {% set custom_data_sources = var("edu:schools:custom_data_sources", []) %}
 
 with stg_school as (
-    select * from {{ ref('stg_ef3__schools') }}
+    select * from {{ validated_ref('stg_ef3__schools') }}
 ),
 bld_ef3__wide_ids_school as (
     select * from {{ ref('bld_ef3__wide_ids_school') }}
@@ -43,7 +43,7 @@ choose_address as (
                 where='address_end_date is null') }}
 ),
 dim_lea as (
-    select * from {{ ref('dim_lea') }}
+    select * from {{ validated_ref('dim_lea') }}
 ),
 formatted as (
     select 
@@ -109,6 +109,8 @@ formatted as (
             {%- endfor -%}
           {%- endfor -%}
         {%- endif %}
+
+        {{ combine_validations(['stg_school', 'dim_lea']) }}
     from stg_school
     join dim_lea 
         on stg_school.k_lea = dim_lea.k_lea

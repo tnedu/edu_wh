@@ -12,13 +12,13 @@
 }}
 
 with stg_calendar as (
-    select * from {{ ref('stg_ef3__calendars') }}
+    select * from {{ validated_ref('stg_ef3__calendars') }}
 ),
 calendar_grades as (
     select * from {{ ref('stg_ef3__calendars__grade_levels') }}
 ),
 dim_school as (
-    select * from {{ ref('dim_school') }}
+    select * from {{ validated_ref('dim_school') }}
 ),
 aggregated_grades as (
     select 
@@ -36,6 +36,8 @@ formatted as (
         stg_calendar.calendar_code,
         stg_calendar.calendar_type,
         aggregated_grades.applicable_grade_levels_array
+
+        {{ combine_validations(['stg_calendar', 'dim_school']) }}
     from stg_calendar
     join dim_school
         on stg_calendar.k_school = dim_school.k_school
