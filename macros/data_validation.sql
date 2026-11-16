@@ -31,21 +31,13 @@
 {% macro validated_ref(model_name) -%}
 
     {%- set validation_config = var('edu:data_validation', {}) -%}
-
-    {%- set validation_enabled =
-        validation_config.get('enabled', false)
-    -%}
-
-    {%- set rules =
-        validation_config.get('models', {}).get(model_name, [])
-    -%}
+    {%- set validation_enabled = validation_config.get('enabled', false) -%}
+    {%- set rules = validation_config.get('models', {}).get(model_name, []) -%}
 
     {%- if validation_enabled and rules | length > 0 -%}
 
         {# Derive the validation-merge node associated with this model. #}
-        {%- set validation_model =
-            'val_' ~ model_name | replace('stg_', '')
-        -%}
+        {%- set validation_model = 'val_' ~ (model_name | replace('stg_', '')) -%}
 
         {#
             Establish the validation dependency without emitting the val_*
@@ -70,20 +62,30 @@
 
 
 {#
-    Combines validation results from one or more upstream models and appends
-    them to a warehouse model.
+    Adds validation columns to a warehouse model and, when configured,
+    propagates validation results from one or more upstream models.
 
-    Only validations whose severity appears in the configured severities map
-    are propagated. The filtered validation array is also used to calculate
-    validation_severity, ensuring the summary can never represent a validation
-    that was stripped during warehouse propagation.
+    When data validation is enabled, validations and validation_severity are
+    always added to the warehouse model.
+
+    propagate_validations controls whether upstream validation results
+    are propagated into those columns. When disabled, validations is
+    initialized as an empty array and validation_severity as null. This still
+    allows validators that directly target the warehouse model to merge their
+    findings into those columns.
+
+    When propagation is enabled, only validations whose severity appears in
+    the configured severities map are propagated. The filtered validation array
+    is also used to calculate validation_severity, ensuring the summary can
+    never represent a validation that was stripped during warehouse
+    propagation.
 
     For example, if "advisory" is not configured as a propagating severity:
       - advisory findings are removed from validations;
       - if no other findings remain, validations is empty; and
       - validation_severity falls back to default_severity, normally null.
 
-    If no severities are configured, no validations are propagated.
+    If no severities are configured, no upstream validations are propagated.
 
     The leading comma is intentional so this macro can be appended directly to
     an existing SELECT column list.
@@ -91,102 +93,111 @@
 {% macro combine_validations(sources) -%}
 
     {%- set validation_config = var('edu:data_validation', {}) -%}
+    {%- set validation_enabled = validation_config.get('enabled', false) -%}
+    {%- set propagate_validations =  validation_config.get('propagate_validations', false) -%}
     {%- set severities = validation_config.get('severities', {}) -%}
 
-    {%- if validation_config.get('enabled', false)
-        and validation_config.get('append_to_warehouse_models', false) %}
+    {%- if validation_enabled %}
 
         ,
 
-        {#
-            Build the combined validation array. Configured severities act as
-            the allowlist for warehouse propagation.
-        #}
-        array_distinct(
-            flatten(
-                array(
-                    {% for source in sources %}
+        {% if propagate_validations %}
 
-                        {% if severities | length > 0 %}
-                            filter(
-                                coalesce(
-                                    {{ source }}.validations,
-                                    cast(
-                                        array() as {{ edu_edfi_source.validation_struct_type() }}
-                                    )
-                                ),
-                                v -> v.severity in (
-                                    {% for severity in severities.keys() %}
-                                    '{{ severity }}'{% if not loop.last %},{% endif %}
-                                    {% endfor %}
-                                )
-                            )
-                        {% else %}
-                            cast(
-                                array() as {{ edu_edfi_source.validation_struct_type() }}
-                            )
-                        {% endif %}{% if not loop.last %},{% endif %}
+            array_distinct(
+                flatten(
+                    array(
+                        {% for source in sources %}
 
-                    {% endfor %}
-                )
-            )
-        ) as validations,
-
-        {#
-            Calculate severity directly from the same validations that survive
-            warehouse filtering.
-
-            transform() converts each propagated validation to its configured
-            numeric severity rank. array_max() selects the highest rank, and
-            the CASE maps that rank back to its severity name.
-
-            When no validations survive, array_max() returns null and the
-            configured default_severity is used instead.
-        #}
-        coalesce(
-            {% if severities | length > 0 %}
-
-                case array_max(
-                    transform(
-                        array_distinct(
-                            flatten(
-                                array(
-                                    {% for source in sources %}
-                                    filter(
-                                        coalesce(
-                                            {{ source }}.validations,
-                                            cast(
-                                                array() as {{ edu_edfi_source.validation_struct_type() }}
-                                            )
-                                        ),
-                                        v -> v.severity in (
-                                            {% for severity in severities.keys() %}
-                                            '{{ severity }}'{% if not loop.last %},{% endif %}
-                                            {% endfor %}
+                            {% if severities | length > 0 %}
+                                filter(
+                                    coalesce(
+                                        {{ source }}.validations,
+                                        cast(
+                                            array() as
+                                            {{ edu_edfi_source.validation_struct_type() }}
                                         )
-                                    ){% if not loop.last %},{% endif %}
-                                    {% endfor %}
+                                    ),
+                                    v -> v.severity in (
+                                        {% for severity in severities.keys() %}
+                                            '{{ severity }}'
+                                            {% if not loop.last %},{% endif %}
+                                        {% endfor %}
+                                    )
                                 )
-                            )
-                        ),
-                        v -> case v.severity
-                            {% for severity, rank in severities.items() %}
-                            when '{{ severity }}' then {{ rank }}
-                            {% endfor %}
-                        end
+                            {% else %}
+                                cast(
+                                    array() as
+                                    {{ edu_edfi_source.validation_struct_type() }}
+                                )
+                            {% endif %}
+
+                            {% if not loop.last %},{% endif %}
+
+                        {% endfor %}
                     )
                 )
-                    {% for severity, rank in severities.items() %}
-                    when {{ rank }} then '{{ severity }}'
-                    {% endfor %}
-                end
+            ) as validations,
+            coalesce(
+                {% if severities | length > 0 %}
 
-            {% else %}
-                null
-            {% endif %},
+                    case array_max(
+                        transform(
+                            array_distinct(
+                                flatten(
+                                    array(
+                                        {% for source in sources %}
 
-            {{ validation_config.get('default_severity', 'null') }}
-        ) as validation_severity
+                                            filter(
+                                                coalesce(
+                                                    {{ source }}.validations,
+                                                    cast(
+                                                        array() as
+                                                        {{ edu_edfi_source.validation_struct_type() }}
+                                                    )
+                                                ),
+                                                v -> v.severity in (
+                                                    {% for severity in severities.keys() %}
+                                                        '{{ severity }}'
+                                                        {% if not loop.last %},{% endif %}
+                                                    {% endfor %}
+                                                )
+                                            )
+
+                                            {% if not loop.last %},{% endif %}
+
+                                        {% endfor %}
+                                    )
+                                )
+                            ),
+                            v -> case v.severity
+                                {% for severity, rank in severities.items() %}
+                                    when '{{ severity }}' then {{ rank }}
+                                {% endfor %}
+                            end
+                        )
+                    )
+                        {% for severity, rank in severities.items() %}
+                            when {{ rank }} then '{{ severity }}'
+                        {% endfor %}
+                    end
+                {% else %}
+                    null
+                {% endif %},
+
+                {{ validation_config.get('default_severity', 'null') }}
+            ) as validation_severity
+
+        {% else %}
+            {#
+                Propagation is disabled, but validation columns are still required
+                so warehouse-level validators can merge their findings later.
+            #}
+            cast(
+                array() as
+                {{ edu_edfi_source.validation_struct_type() }}
+            ) as validations,
+            cast(null as string) as validation_severity
+        {% endif %} 
 
     {%- endif %}
 
@@ -207,6 +218,7 @@
     canonical validation contract.
 
     This materialization:
+      - filters out findings whose severity is not configured;
       - aggregates new validation findings by the target model''s key;
       - appends those findings to the target row''s existing validations;
       - removes duplicate validation structs;
@@ -220,10 +232,11 @@
     target_model. These columns are used for both aggregation and the MERGE
     condition.
 
-    When edu:data_validation.severities is configured, its numeric ranks define
-    the ordering used to select the highest severity. If no severity ranking is
-    configured, the framework cannot reliably compare findings and assigns
-    "unknown" to validation_severity.
+    edu:data_validation.severities serves as both the allowlist for findings stored
+    on warehouse models and the numeric ranking used to calculate
+    validation_severity. Findings whose severity is not configured are discarded
+    before aggregation. If no severities are configured, no warehouse-level
+    findings are merged.
 
     This materialization mutates target_model directly. The associated val_*
     dbt node acts as a dependency barrier and does not create its own relation.
@@ -249,28 +262,27 @@
                     {{ adapter.quote(key) }}{% if not loop.last %},{% endif %}
                 {% endfor %},
 
-                {# Collect all newly generated findings for the target row. #}
+                {#
+                    Collect only findings whose severity is allowed by the
+                    configured severities map.
+                #}
                 collect_list(validation) as validations,
 
                 {#
-                    Determine the highest severity among the new findings.
-
-                    Severities not present in the configured ranking receive
-                    rank 0. If no ranking is configured, their relative
-                    importance cannot be determined.
+                    Determine the highest configured severity among the
+                    allowed findings for the target row.
                 #}
                 {% if severities | length > 0 %}
                     max_by(
                         validation.severity,
                         case validation.severity
                             {% for severity, rank in severities.items() %}
-                            when '{{ severity }}' then {{ rank }}
+                                when '{{ severity }}' then {{ rank }}
                             {% endfor %}
-                            else 0
                         end
                     )
                 {% else %}
-                    'unknown'
+                    cast(null as string)
                 {% endif %} as validation_severity
 
             from (
@@ -280,6 +292,26 @@
                 #}
                 {{ sql }}
             ) as validation_rows
+
+            {#
+                Configured severities are the allowlist for warehouse
+                validation storage. Findings with unconfigured severities
+                are discarded before aggregation and cannot affect either
+                validations or validation_severity.
+
+                When no severities are configured, no findings are allowed.
+            #}
+            where
+                {% if severities | length > 0 %}
+                    validation.severity in (
+                        {% for severity in severities.keys() %}
+                            '{{ severity }}'
+                            {% if not loop.last %},{% endif %}
+                        {% endfor %}
+                    )
+                {% else %}
+                    false
+                {% endif %}
 
             group by
                 {% for key in target_keys %}
@@ -317,7 +349,7 @@
             ),
 
             {#
-                Compare the target row's existing severity with the highest
+                Compare the target row''s existing severity with the highest
                 severity among the new findings.
 
                 Each severity is converted to its configured numeric rank,
