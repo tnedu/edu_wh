@@ -60,144 +60,182 @@
 
 {%- endmacro %}
 
-
 {#
-    Adds validation columns to a warehouse model and, when configured,
-    propagates validation results from one or more upstream models.
+    Internal helper used by combine_validations().
 
-    When data validation is enabled, validations and validation_severity are
-    always added to the warehouse model.
-
-    propagate_validations controls whether upstream validation results
-    are propagated into those columns. When disabled, validations is
-    initialized as an empty array and validation_severity as null. This still
-    allows validators that directly target the warehouse model to merge their
-    findings into those columns.
-
-    When propagation is enabled, only validations whose severity appears in
-    the configured severities map are propagated. The filtered validation array
-    is also used to calculate validation_severity, ensuring the summary can
-    never represent a validation that was stripped during warehouse
+    Returns a SQL expression containing the distinct validation findings from
+    the supplied sources whose severities are configured for warehouse
     propagation.
 
-    For example, if "advisory" is not configured as a propagating severity:
-      - advisory findings are removed from validations;
-      - if no other findings remain, validations is empty; and
-      - validation_severity falls back to default_severity, normally null.
+    The configured edu:data_validation.severities mapping acts as the
+    propagation allowlist. Findings with severities not present in that mapping
+    are intentionally excluded.
 
-    If no severities are configured, no upstream validations are propagated.
+    In normal mode, validations are combined across the supplied sources for
+    the current input row.
+
+    When aggregate=true, validations are additionally collected across every
+    input row contributing to the current GROUP BY result before being
+    flattened and deduplicated.
+
+    If no severities are configured, a correctly typed empty validation array
+    is returned.
+
+    This macro returns only a SQL expression. It does not emit a column alias
+    or leading comma and is intended to be consumed by combine_validations().
+#}
+{% macro _combined_validation_array(sources, aggregate=false) -%}
+
+    {%- set validation_config = var('edu:data_validation', {}) -%}
+    {%- set severities = validation_config.get('severities', {}) -%}
+
+    array_distinct(
+        flatten(
+            {% if aggregate %}
+                collect_list(
+                    flatten(
+                        array(
+                            {% for source in sources %}
+
+                                {% if severities | length > 0 %}
+                                    filter(
+                                        coalesce(
+                                            {{ source }}.validations,
+                                            cast(
+                                                array() as {{ edu_edfi_source.validation_struct_type() }}
+                                            )
+                                        ),
+                                        v -> v.severity in (
+                                            {% for severity in severities.keys() %}
+                                            '{{ severity }}'{% if not loop.last %},{% endif %}
+                                            {% endfor %}
+                                        )
+                                    )
+                                {% else %}
+                                    cast(
+                                        array() as {{ edu_edfi_source.validation_struct_type() }}
+                                    )
+                                {% endif %}{% if not loop.last %},{% endif %}
+
+                            {% endfor %}
+                        )
+                    )
+                )
+
+            {% else %}
+
+                array(
+                    {% for source in sources %}
+
+                        {% if severities | length > 0 %}
+                            filter(
+                                coalesce(
+                                    {{ source }}.validations,
+                                    cast(
+                                        array() as {{ edu_edfi_source.validation_struct_type() }}
+                                    )
+                                ),
+                                v -> v.severity in (
+                                    {% for severity in severities.keys() %}
+                                    '{{ severity }}'{% if not loop.last %},{% endif %}
+                                    {% endfor %}
+                                )
+                            )
+                        {% else %}
+                            cast(
+                                array() as {{ edu_edfi_source.validation_struct_type() }}
+                            )
+                        {% endif %}{% if not loop.last %},{% endif %}
+
+                    {% endfor %}
+                )
+
+            {% endif %}
+        )
+    )
+
+{%- endmacro %}
+
+
+{#
+    Combines validation results from one or more upstream models and appends
+    them to a warehouse model.
+
+    In normal mode, validations are combined across the supplied source
+    relations for the current row.
+
+    When aggregate=true, the input query is expected to contain a GROUP BY.
+    Validations from every input row contributing to the resulting warehouse
+    row are collected, flattened, and deduplicated. Validation columns therefore
+    do not need to become part of the model''s grouping key.
+
+    Only validations whose severity appears in edu:data_validation.severities
+    are propagated into warehouse models. The same severity configuration is
+    used to calculate validation_severity from the validations that survive
+    filtering.
+
+    validation_severity is calculated from the exact same filtered validation
+    array that is propagated. A finding removed during propagation therefore
+    cannot influence the resulting severity.
+
+    If no validations survive filtering, validation_severity falls back to
+    default_severity, which is normally null.
 
     The leading comma is intentional so this macro can be appended directly to
     an existing SELECT column list.
 #}
-{% macro combine_validations(sources) -%}
+{% macro combine_validations(sources, aggregate=false) -%}
 
     {%- set validation_config = var('edu:data_validation', {}) -%}
-    {%- set validation_enabled = validation_config.get('enabled', false) -%}
-    {%- set propagate_validations =  validation_config.get('propagate_validations', false) -%}
     {%- set severities = validation_config.get('severities', {}) -%}
 
-    {%- if validation_enabled %}
+    {%- if validation_config.get('enabled', false)
+        and validation_config.get('propagate_validations', false) %}
 
         ,
 
-        {% if propagate_validations %}
+        {# Build the array of validation findings eligible for propagation. #}
+        {{ edu_wh._combined_validation_array(
+            sources,
+            aggregate=aggregate
+        ) }} as validations,
 
-            array_distinct(
-                flatten(
-                    array(
-                        {% for source in sources %}
+        {#
+            Determine the highest severity from the propagated validations.
 
-                            {% if severities | length > 0 %}
-                                filter(
-                                    coalesce(
-                                        {{ source }}.validations,
-                                        cast(
-                                            array() as
-                                            {{ edu_edfi_source.validation_struct_type() }}
-                                        )
-                                    ),
-                                    v -> v.severity in (
-                                        {% for severity in severities.keys() %}
-                                            '{{ severity }}'
-                                            {% if not loop.last %},{% endif %}
-                                        {% endfor %}
-                                    )
-                                )
-                            {% else %}
-                                cast(
-                                    array() as
-                                    {{ edu_edfi_source.validation_struct_type() }}
-                                )
-                            {% endif %}
+            Each surviving finding is converted to its configured numeric rank.
+            array_max() selects the highest rank, which is then mapped back to
+            the corresponding severity name.
+        #}
+        coalesce(
+            {% if severities | length > 0 %}
 
-                            {% if not loop.last %},{% endif %}
-
-                        {% endfor %}
+                case array_max(
+                    transform(
+                        {{ edu_wh._combined_validation_array(
+                            sources,
+                            aggregate=aggregate
+                        ) }},
+                        v -> case v.severity
+                            {% for severity, rank in severities.items() %}
+                            when '{{ severity }}' then {{ rank }}
+                            {% endfor %}
+                        end
                     )
                 )
-            ) as validations,
-            coalesce(
-                {% if severities | length > 0 %}
+                    {% for severity, rank in severities.items() %}
+                    when {{ rank }} then '{{ severity }}'
+                    {% endfor %}
+                end
 
-                    case array_max(
-                        transform(
-                            array_distinct(
-                                flatten(
-                                    array(
-                                        {% for source in sources %}
+            {% else %}
 
-                                            filter(
-                                                coalesce(
-                                                    {{ source }}.validations,
-                                                    cast(
-                                                        array() as
-                                                        {{ edu_edfi_source.validation_struct_type() }}
-                                                    )
-                                                ),
-                                                v -> v.severity in (
-                                                    {% for severity in severities.keys() %}
-                                                        '{{ severity }}'
-                                                        {% if not loop.last %},{% endif %}
-                                                    {% endfor %}
-                                                )
-                                            )
+                null
 
-                                            {% if not loop.last %},{% endif %}
+            {% endif %},
 
-                                        {% endfor %}
-                                    )
-                                )
-                            ),
-                            v -> case v.severity
-                                {% for severity, rank in severities.items() %}
-                                    when '{{ severity }}' then {{ rank }}
-                                {% endfor %}
-                            end
-                        )
-                    )
-                        {% for severity, rank in severities.items() %}
-                            when {{ rank }} then '{{ severity }}'
-                        {% endfor %}
-                    end
-                {% else %}
-                    null
-                {% endif %},
-
-                {{ validation_config.get('default_severity', 'null') }}
-            ) as validation_severity
-
-        {% else %}
-            {#
-                Propagation is disabled, but validation columns are still required
-                so warehouse-level validators can merge their findings later.
-            #}
-            cast(
-                array() as
-                {{ edu_edfi_source.validation_struct_type() }}
-            ) as validations,
-            cast(null as string) as validation_severity
-        {% endif %} 
+            {{ validation_config.get('default_severity', 'null') }}
+        ) as validation_severity
 
     {%- endif %}
 
