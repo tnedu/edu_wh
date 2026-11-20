@@ -2,5 +2,4 @@
 # SPDX-License-Identifier: MPL-2.0
 
 packages:
-  - package: edanalytics/edu_edfi_source
-    version: [">=0.7.3", "<0.8.0"]
+  - local: C:\Users\ca21034\VSCodeProjects\edu_edfi_source

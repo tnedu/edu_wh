@@ -11,7 +11,7 @@
 }}
 
 with stg_lea as (
-    select * from {{ ref('stg_ef3__local_education_agencies') }}
+    select * from {{ validated_ref('stg_ef3__local_education_agencies') }}
 ),
 tenant_lea_ownership as (
     select * from {{ ref('bld_ef3__tenant_lea_ownership') }}
@@ -53,6 +53,7 @@ formatted as (
         choose_address.county_fips_code,
         choose_address.latitude,
         choose_address.longitude
+        {{ combine_validations(['stg_lea']) }}
     from stg_lea
     left join choose_address 
         on stg_lea.k_lea = choose_address.k_lea

@@ -1,0 +1,15 @@
+version: 1
+
+models:
+  - name: val_dim_school
+    config:
+      tags: ['data_validation']
+      enabled: "{{ var('edu:data_validation', {}).get('enabled', false) and (var('edu:data_validation', {}).get('models', {}).get('dim_school', []) | length > 0) }}"
+  - name: val_dim_school_calendar
+    config:
+      tags: ['data_validation']
+      enabled: "{{ var('edu:data_validation', {}).get('enabled', false) and (var('edu:data_validation', {}).get('models', {}).get('dim_school_calendar', []) | length > 0) }}"
+  - name: val_dim_lea
+    config:
+      tags: ['data_validation']
+      enabled: "{{ var('edu:data_validation', {}).get('enabled', false) and (var('edu:data_validation', {}).get('models', {}).get('dim_lea', []) | length > 0) }}"

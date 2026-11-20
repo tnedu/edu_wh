@@ -25,23 +25,28 @@ clean-targets:         # directories to be removed by `dbt clean`
 
 models:
   edu_wh:
-    +materialized: table
     build:
+      +materialized: table
       +schema: build
       tpdm:
         +enabled: "{{ var('edu:tpdm:enabled', False) }}"
     core_warehouse:
+      +materialized: table
       +schema: wh
     finance_warehouse:
+      +materialized: table
       +schema: finance_wh
       +enabled: "{{ var('edu:finance:enabled', False) }}"
     survey_warehouse:
+      +materialized: table
       +schema: survey_wh
       +enabled: "{{ var('src:domain:survey:enabled', False) }}"
     tpdm_warehouse:
+      +materialized: table
       +schema: wh
       +enabled: "{{ var('edu:tpdm:enabled', False) }}"
     qc:
+      +materialized: table
       +schema: qc
 
 vars:
